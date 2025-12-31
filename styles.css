@@ -1,0 +1,205 @@
+/* Search Tab Plugin Styles */
+
+.search-shortlist-navigation {
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.nav-header {
+	margin-bottom: 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding: 4px 8px;
+	position: sticky;
+	top: 0;
+	z-index: 101;
+	background: var(--background-primary);
+	margin-top: 0;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 28px;
+	height: 28px;
+}
+
+.nav-header h3 {
+	display: none; /* Hide title to save space */
+}
+
+.mode-selector {
+	display: flex;
+	gap: 2px;
+	align-items: center;
+	margin-right: auto;
+}
+
+.mode-btn-icon {
+	padding: 0;
+	border: none;
+	background: transparent;
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 14px;
+	transition: all 0.15s;
+	width: 24px;
+	height: 24px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
+	color: var(--text-muted);
+	opacity: 0.7;
+}
+
+.mode-btn-icon:hover {
+	background: var(--background-modifier-hover);
+	opacity: 1;
+	color: var(--text-normal);
+}
+
+.mode-btn-icon.active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	opacity: 1;
+}
+
+.nav-results {
+	flex: 1;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+}
+
+.nav-instructions {
+	color: var(--text-muted);
+	font-size: 13px;
+	margin: 10px 0;
+	line-height: 1.6;
+}
+
+.nav-file-header {
+	position: sticky;
+	top: 0;
+	z-index: 10;
+	padding: 10px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.nav-file-header h4 {
+	margin: 0;
+	color: var(--text-normal);
+	font-size: 16px;
+	font-weight: 600;
+}
+
+.nav-context-info {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 4px;
+	font-style: italic;
+}
+
+.nav-file-content {
+	flex: 1;
+	overflow-y: auto;
+}
+
+.nav-file-content .markdown-view {
+	font-family: var(--font-text);
+	line-height: 1.6;
+	color: var(--text-normal);
+}
+
+.nav-file-content .markdown-preview-view {
+	padding: 0;
+}
+
+/* Make markdown rendering look like Obsidian's reading view */
+.nav-file-content .markdown-reading-view {
+	font-size: var(--font-text-size);
+	line-height: var(--line-height-normal);
+}
+
+.nav-file-content .markdown-reading-view h1,
+.nav-file-content .markdown-reading-view h2,
+.nav-file-content .markdown-reading-view h3,
+.nav-file-content .markdown-reading-view h4,
+.nav-file-content .markdown-reading-view h5,
+.nav-file-content .markdown-reading-view h6 {
+	font-weight: var(--heading-weight);
+	margin-top: 1.2em;
+	margin-bottom: 0.6em;
+}
+
+.nav-file-content .markdown-reading-view p {
+	margin: 0.5em 0;
+}
+
+.nav-file-content .markdown-reading-view ul,
+.nav-file-content .markdown-reading-view ol {
+	margin: 0.5em 0;
+	padding-left: 1.5em;
+}
+
+.nav-file-content .markdown-reading-view code {
+	background: var(--code-background);
+	padding: 2px 4px;
+	border-radius: 3px;
+	font-family: var(--font-monospace);
+}
+
+.nav-file-content .markdown-reading-view pre {
+	background: var(--code-background);
+	padding: 1em;
+	border-radius: 4px;
+	overflow-x: auto;
+}
+
+.nav-file-content .markdown-reading-view blockquote {
+	border-left: 3px solid var(--blockquote-border-color);
+	padding-left: 1em;
+	margin: 1em 0;
+	color: var(--blockquote-color);
+}
+
+.nav-error {
+	color: var(--text-error);
+	font-size: 13px;
+}
+
+.nav-title-area {
+	margin-top: 10px;
+	padding: 8px;
+	background: var(--background-secondary);
+	border-radius: 4px;
+	font-size: 13px;
+	min-height: 20px;
+}
+
+.nav-context-title {
+	color: var(--text-normal);
+	font-weight: 500;
+}
+
+.nav-file-header {
+	position: sticky;
+	top: 0;
+	z-index: 100;
+	padding: 12px;
+	border-bottom: 2px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+	margin-bottom: 10px;
+	margin-top: 0;
+}
+
+.nav-file-header h4 {
+	margin: 0;
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
