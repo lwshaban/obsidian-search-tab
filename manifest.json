@@ -1,10 +1,10 @@
 {
 	"id": "search-tab",
 	"name": "Search Tab",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
+	"version": "0.1.0",
+	"minAppVersion": "1.11.3",
 	"description": "Search Tab - Navigate search results and backlinks with keyboard shortcuts",
 	"author": "Lawrence Shaban",
-	"authorUrl": "",
+	"authorUrl": "https://github.com/lwshaban",
 	"isDesktopOnly": false
 }

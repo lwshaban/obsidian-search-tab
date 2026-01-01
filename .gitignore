@@ -53,3 +53,12 @@ makefile
 sync.sh
 sync-files.txt
 config.env.example
+
+# Commit Messages
+commit.txt
+
+# Obsidian Docs
+obsidian-developer-docs/
+
+# LLM
+.claude/
