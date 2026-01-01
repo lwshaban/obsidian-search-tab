@@ -1,6 +1,6 @@
 {
 	"name": "search-tab",
-	"version": "1.0.0",
+	"version": "0.0.0",
 	"type": "module",
 	"description": "Navigate search results with keyboard and build a shortlist",
 	"main": "main.js",

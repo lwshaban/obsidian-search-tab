@@ -1,16 +1,16 @@
-import { Plugin, TFile, WorkspaceLeaf, MarkdownView, View, ItemView, Workspace, MarkdownRenderer } from 'obsidian';
+import { Plugin, TFile, WorkspaceLeaf, MarkdownView, View, ItemView, MarkdownRenderer } from 'obsidian';
 
-type ViewType = 'search' | 'backlinks' | null;
+const SEARCH_TAB_VIEW_TYPE = 'search-tab-view';
+const SEARCH_TAB_BACKLINKS_VIEW_TYPE = 'search-tab-backlinks-view';
 
-const NAVIGATION_VIEW_TYPE = 'search-shortlist-navigation';
-
-class NavigationView extends ItemView {
-	public plugin: SearchShortlistPlugin;
-	public mode: 'search' | 'backlinks' = 'search';
-	private targetFile: TFile | null = null;
-	private searchBtn: HTMLButtonElement | null = null;
-	private backlinksBtn: HTMLButtonElement | null = null;
-	private embeddedLeaf: WorkspaceLeaf | null = null;
+class SearchTabView extends ItemView {
+	plugin: SearchShortlistPlugin;
+	currentFile: TFile | null = null;
+	previewContainer: HTMLElement;
+	mode: 'search' | 'backlinks' = 'search';
+	searchBtn: HTMLButtonElement | null = null;
+	backlinksBtn: HTMLButtonElement | null = null;
+	embeddedLeaf: WorkspaceLeaf | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: SearchShortlistPlugin) {
 		super(leaf);
@@ -18,13 +18,10 @@ class NavigationView extends ItemView {
 	}
 
 	getViewType(): string {
-		return NAVIGATION_VIEW_TYPE;
+		return SEARCH_TAB_VIEW_TYPE;
 	}
 
 	getDisplayText(): string {
-		if (this.mode === 'backlinks' && this.targetFile) {
-			return `Backlinks: ${this.targetFile.basename}`;
-		}
 		return 'Search Tab';
 	}
 
@@ -33,582 +30,625 @@ class NavigationView extends ItemView {
 	}
 
 	async onOpen() {
-		this.contentEl.empty();
-		this.contentEl.addClass('search-shortlist-navigation');
-		
-		// Create compact header matching Obsidian's native style
-		const header = this.contentEl.createDiv('nav-header');
-		header.style.position = 'sticky';
-		header.style.top = '0';
-		header.style.zIndex = '101';
-		header.style.background = 'var(--background-primary)';
-		header.style.padding = '4px 8px';
-		header.style.marginBottom = '0';
-		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		const container = this.containerEl.children[1];
+		container.empty();
+		container.addClass('search-tab-container');
+
+		// Create mode selector header
+		const header = container.createDiv('search-tab-mode-header');
 		header.style.display = 'flex';
+		header.style.justifyContent = 'center';
 		header.style.alignItems = 'center';
-		header.style.gap = '6px';
-		header.style.minHeight = '28px';
-		header.style.height = '28px';
-		
-		// Mode selector as compact icon buttons (like Obsidian's native buttons)
-		const modeContainer = header.createDiv('mode-selector');
-		modeContainer.style.display = 'flex';
-		modeContainer.style.gap = '2px';
-		modeContainer.style.alignItems = 'center';
-		modeContainer.style.marginRight = 'auto';
-		
-		this.searchBtn = modeContainer.createEl('button', { 
-			text: '🔍', 
-			cls: 'mode-btn-icon',
-			attr: { 'aria-label': 'Search mode', 'title': 'Search mode' }
-		});
-		this.backlinksBtn = modeContainer.createEl('button', { 
-			text: '🔗', 
-			cls: 'mode-btn-icon',
-			attr: { 'aria-label': 'Backlinks mode', 'title': 'Backlinks mode' }
-		});
-		
+		header.style.padding = '8px';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		header.style.gap = '8px';
+
+		this.searchBtn = header.createEl('button', { text: '🔍 Search', cls: 'search-tab-mode-btn' });
+		this.searchBtn.style.padding = '6px 12px';
+		this.searchBtn.style.border = '1px solid var(--background-modifier-border)';
+		this.searchBtn.style.borderRadius = '4px';
+		this.searchBtn.style.cursor = 'pointer';
+		this.searchBtn.style.backgroundColor = 'var(--interactive-accent)';
+		this.searchBtn.style.color = 'var(--text-on-accent)';
+
+		this.backlinksBtn = header.createEl('button', { text: '🔗 Backlinks', cls: 'search-tab-mode-btn' });
+		this.backlinksBtn.style.padding = '6px 12px';
+		this.backlinksBtn.style.border = '1px solid var(--background-modifier-border)';
+		this.backlinksBtn.style.borderRadius = '4px';
+		this.backlinksBtn.style.cursor = 'pointer';
+		this.backlinksBtn.style.backgroundColor = 'var(--background-primary)';
+
 		this.searchBtn.addEventListener('click', () => {
 			this.setMode('search');
-			this.plugin.setViewType('search');
 		});
+
+		this.backlinksBtn.addEventListener('click', () => {
+			this.setMode('backlinks');
+		});
+
+		// Create preview container
+		this.previewContainer = container.createDiv('search-tab-preview');
+		this.previewContainer.style.height = '100%';
+		this.previewContainer.style.display = 'flex';
+		this.previewContainer.style.flexDirection = 'column';
+
+		this.showInstructions();
+	}
+
+	setMode(mode: 'search' | 'backlinks') {
+		this.mode = mode;
+		this.plugin.currentMode = mode;
+
+		// Update button styles
+		if (this.searchBtn && this.backlinksBtn) {
+			if (mode === 'search') {
+				this.searchBtn.style.backgroundColor = 'var(--interactive-accent)';
+				this.searchBtn.style.color = 'var(--text-on-accent)';
+				this.backlinksBtn.style.backgroundColor = 'var(--background-primary)';
+				this.backlinksBtn.style.color = 'var(--text-normal)';
+			} else {
+				this.backlinksBtn.style.backgroundColor = 'var(--interactive-accent)';
+				this.backlinksBtn.style.color = 'var(--text-on-accent)';
+				this.searchBtn.style.backgroundColor = 'var(--background-primary)';
+				this.searchBtn.style.color = 'var(--text-normal)';
+			}
+		}
+
+		// Update search results - this will restore saved index or reset to -1 if changed
+		this.plugin.updateSearchResults();
+	}
+
+	showInstructions() {
+		this.previewContainer.empty();
+		const instructions = this.previewContainer.createDiv('search-tab-instructions');
+		instructions.style.padding = '20px';
+		instructions.createEl('h3', { text: 'Search Tab' });
+		instructions.createEl('p', { text: 'Use Cmd/Ctrl+↑↓ to navigate through search or backlinks results' });
+		instructions.createEl('p', { text: 'Previews will appear here as you navigate' });
+	}
+
+	async displayFile(file: TFile) {
+		this.currentFile = file;
+		this.previewContainer.empty();
+
+		// Auto-update Search Tab Backlinks panel if it's open
+		if (this.plugin.searchTabBacklinksView) {
+			await this.plugin.searchTabBacklinksView.updateBacklinks(file);
+		}
+
+		// Create content container for the embedded markdown view
+		const contentContainer = this.previewContainer.createDiv('search-tab-content');
+		contentContainer.style.flex = '1';
+		contentContainer.style.overflow = 'auto';
+		contentContainer.style.position = 'relative';
+
+		// Track if this is the first time creating the embedded leaf
+		const isFirstCreation = !this.embeddedLeaf || !this.embeddedLeaf.view;
+
+		// Create embedded leaf ONCE for editing - keep reusing it
+		if (isFirstCreation) {
+			const workspace = this.app.workspace;
+			this.embeddedLeaf = workspace.getLeaf('split');
+			
+			// Hide the tab IMMEDIATELY before any rendering
+			this.closeEmptyTab(this.embeddedLeaf);
+		}
+
+		// Safety check
+		if (!this.embeddedLeaf) return;
+
+		// Open the file in the embedded leaf
+		await this.embeddedLeaf.openFile(file);
+
+		// Get the markdown view and embed it
+		const markdownView = this.embeddedLeaf.view as MarkdownView;
+		if (markdownView && markdownView.containerEl) {
+			// Move the view's container into our content area
+			contentContainer.empty();
+			contentContainer.appendChild(markdownView.containerEl);
+			markdownView.containerEl.style.height = '100%';
+		}
+	}
+
+	closeEmptyTab(leaf: WorkspaceLeaf) {
+		// Hide the entire split container that was created for the embedded leaf
+		const parent = (leaf as any).parent;
+		if (!parent || !parent.containerEl) return;
+
+		// Hide the parent split container by positioning it off-screen
+		// Don't use display:none to preserve event handling
+		const parentContainerEl = parent.containerEl;
+		if (parentContainerEl) {
+			parentContainerEl.style.position = 'absolute';
+			parentContainerEl.style.left = '-10000px';
+			parentContainerEl.style.top = '-10000px';
+			parentContainerEl.style.width = '1px';
+			parentContainerEl.style.height = '1px';
+			parentContainerEl.style.overflow = 'hidden';
+			parentContainerEl.style.pointerEvents = 'none'; // Prevent accidental clicks
+		}
+	}
+
+	async onClose() {
+		// Cleanup the embedded leaf
+		if (this.embeddedLeaf) {
+			this.embeddedLeaf.detach();
+			this.embeddedLeaf = null;
+		}
+		this.currentFile = null;
+
+		// Clear the plugin's reference to this view
+		if (this.plugin.searchTabView === this) {
+			this.plugin.searchTabView = null;
+		}
+	}
+}
+
+class SearchTabBacklinksView extends ItemView {
+	plugin: SearchShortlistPlugin;
+	targetFile: TFile | null = null;
+	backlinksContainer: HTMLElement;
+
+	constructor(leaf: WorkspaceLeaf, plugin: SearchShortlistPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	getViewType(): string {
+		return SEARCH_TAB_BACKLINKS_VIEW_TYPE;
+	}
+
+	getDisplayText(): string {
+		return 'Search Tab Backlinks';
+	}
+
+	getIcon(): string {
+		return 'links-coming-in';
+	}
+
+	async onOpen() {
+		const container = this.containerEl.children[1];
+		container.empty();
+		container.addClass('search-tab-backlinks-view');
+
+		this.backlinksContainer = container.createDiv('backlinks-container');
+		this.backlinksContainer.style.height = '100%';
+		this.backlinksContainer.style.display = 'flex';
+		this.backlinksContainer.style.flexDirection = 'column';
+		this.backlinksContainer.style.overflow = 'hidden';
+
+		// If Search Tab already has a file open, show its backlinks immediately
+		if (this.plugin.searchTabView && this.plugin.searchTabView.currentFile) {
+			await this.updateBacklinks(this.plugin.searchTabView.currentFile);
+		} else {
+			this.showInstructions();
+		}
+	}
+
+	showInstructions() {
+		this.backlinksContainer.empty();
+		const instructions = this.backlinksContainer.createDiv('backlinks-instructions');
+		instructions.style.padding = '20px';
+		instructions.style.textAlign = 'center';
+		instructions.style.color = 'var(--text-muted)';
+		instructions.createEl('p', { text: 'This panel shows backlinks and unlinked mentions for the file currently displayed in Search Tab' });
+		instructions.createEl('p', { text: 'Navigate through search results to see backlinks update automatically' });
+	}
+
+	async updateBacklinks(file: TFile) {
+		this.targetFile = file;
+		this.backlinksContainer.empty();
+
+		// Create header showing which file's backlinks we're viewing
+		const header = this.backlinksContainer.createDiv('backlinks-header');
+		header.style.padding = '8px 12px';
+		header.style.borderBottom = '1px solid var(--background-modifier-border)';
+		header.style.backgroundColor = 'var(--background-secondary)';
+		header.style.fontSize = '0.9em';
+		header.style.fontWeight = '500';
 		
-		this.backlinksBtn.addEventListener('click', async () => {
-			// When switching to backlinks, try to get the current file
-			const activeLeaf = this.plugin.app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeLeaf && activeLeaf.file) {
-				this.setMode('backlinks', activeLeaf.file);
-				this.plugin.setViewType('backlinks', activeLeaf.file);
-				
-				// Try to open backlinks view if it doesn't exist
-				const backlinksView = this.plugin.getBacklinksView();
-				if (!backlinksView) {
-					// Open backlinks for the current file
-					// Try to open backlinks pane
-					const backlinksLeaf = this.plugin.app.workspace.getLeavesOfType('backlink');
-					if (backlinksLeaf.length === 0) {
-						// Create a new backlinks leaf
-						const newLeaf = this.plugin.app.workspace.getLeaf('split', 'vertical');
-						await newLeaf.setViewState({
-							type: 'backlink',
-							state: { file: activeLeaf.file.path }
-						});
+		const fileName = header.createSpan();
+		fileName.style.color = 'var(--text-normal)';
+		fileName.setText(`Backlinks for: ${file.basename}`);
+		
+		const filePath = header.createDiv();
+		filePath.style.fontSize = '0.85em';
+		filePath.style.color = 'var(--text-muted)';
+		filePath.style.marginTop = '2px';
+		filePath.setText(file.path);
+
+		// Get backlinks using our function (includes both linked and unlinked mentions)
+		const backlinks = await this.plugin.getBacklinksForFile(file);
+
+		if (backlinks.length === 0) {
+			const noResults = this.backlinksContainer.createDiv('no-backlinks');
+			noResults.style.padding = '20px';
+			noResults.style.textAlign = 'center';
+			noResults.style.color = 'var(--text-muted)';
+			noResults.createEl('p', { text: 'No backlinks or mentions found' });
+			return;
+		}
+
+		// Separate linked and unlinked mentions
+		const linkedMentions = backlinks.filter(b => b.isLinked);
+		const unlinkedMentions = backlinks.filter(b => !b.isLinked);
+
+		// Create scrollable content area
+		const contentArea = this.backlinksContainer.createDiv('backlinks-content');
+		contentArea.style.flex = '1';
+		contentArea.style.overflowY = 'auto';
+		contentArea.style.padding = '8px';
+
+		// Display linked mentions section
+		if (linkedMentions.length > 0) {
+			const linkedSection = contentArea.createDiv('backlinks-section');
+			linkedSection.style.marginBottom = '15px';
+			
+			const linkedHeader = linkedSection.createDiv('backlinks-section-header');
+			linkedHeader.style.padding = '6px 0';
+			linkedHeader.style.fontSize = '0.9em';
+			linkedHeader.style.fontWeight = '600';
+			linkedHeader.style.color = 'var(--text-normal)';
+			linkedHeader.createSpan({ text: `🔗 Linked mentions (${linkedMentions.length})` });
+			
+			const linkedList = linkedSection.createDiv('backlinks-items');
+			this.renderBacklinkItems(linkedList, linkedMentions);
+		}
+
+		// Display unlinked mentions section
+		if (unlinkedMentions.length > 0) {
+			const unlinkedSection = contentArea.createDiv('backlinks-section');
+			unlinkedSection.style.marginBottom = '15px';
+			
+			const unlinkedHeader = unlinkedSection.createDiv('backlinks-section-header');
+			unlinkedHeader.style.padding = '6px 0';
+			unlinkedHeader.style.fontSize = '0.9em';
+			unlinkedHeader.style.fontWeight = '600';
+			unlinkedHeader.style.color = 'var(--text-muted)';
+			unlinkedHeader.createSpan({ text: `📝 Unlinked mentions (${unlinkedMentions.length})` });
+			
+			const unlinkedList = unlinkedSection.createDiv('backlinks-items');
+			this.renderBacklinkItems(unlinkedList, unlinkedMentions);
+		}
+	}
+
+	renderBacklinkItems(container: HTMLElement, backlinks: Array<{ file: TFile; isLinked: boolean }>) {
+		backlinks.forEach(backlinkItem => {
+			const backlinkFile = backlinkItem.file;
+			const item = container.createDiv('backlink-item');
+			item.style.padding = '8px 10px';
+			item.style.cursor = 'pointer';
+			item.style.borderRadius = '4px';
+			item.style.marginBottom = '2px';
+
+			// Visual distinction for unlinked mentions
+			if (!backlinkItem.isLinked) {
+				item.style.opacity = '0.85';
+				item.style.fontStyle = 'italic';
+			}
+
+			item.addEventListener('mouseenter', () => {
+				item.style.backgroundColor = 'var(--background-modifier-hover)';
+			});
+			item.addEventListener('mouseleave', () => {
+				item.style.backgroundColor = '';
+			});
+
+			const title = item.createDiv('backlink-title');
+			title.setText(backlinkFile.basename);
+			title.style.fontWeight = '500';
+
+			const path = item.createDiv('backlink-path');
+			path.setText(backlinkFile.path);
+			path.style.fontSize = '0.85em';
+			path.style.color = 'var(--text-muted)';
+
+			// Click to open in Search Tab (or Cmd+Click to open in new tab)
+			item.addEventListener('click', async (evt: MouseEvent) => {
+				// Check if Cmd/Ctrl key is pressed
+				if (evt.metaKey || evt.ctrlKey) {
+					// Open in new tab
+					evt.preventDefault();
+					evt.stopPropagation();
+					
+					const newLeaf = this.app.workspace.getLeaf('tab');
+					await newLeaf.openFile(backlinkFile);
+				} else {
+					// Navigate to this file in Search Tab
+					evt.preventDefault();
+					evt.stopPropagation();
+					
+					if (this.plugin.searchTabView) {
+						// Find the index of this backlink file in the current results
+						const index = this.plugin.searchResultsCache.findIndex(f => f.path === backlinkFile.path);
+						if (index >= 0) {
+							// Set the index and highlight
+							await this.plugin.setIndexAndHighlight(index);
+						} else {
+							// File not in current results, just display it
+							await this.plugin.searchTabView.displayFile(backlinkFile);
+						}
+					} else {
+						// If Search Tab isn't open, open the file normally
+						await this.app.workspace.getLeaf(false).openFile(backlinkFile);
 					}
 				}
-			} else {
-				this.setMode('backlinks');
-				this.plugin.setViewType('backlinks');
-			}
+			});
 		});
-		
-		// Update button states
-		this.updateButtonStates();
-		
-		// Results container
-		this.contentEl.createDiv('nav-results');
-		
-		this.updateDisplay();
 	}
 
-	setMode(mode: 'search' | 'backlinks', targetFile?: TFile) {
-		this.mode = mode;
-		if (targetFile) {
-			this.targetFile = targetFile;
-		}
-		this.updateButtonStates();
-		this.updateDisplay();
-	}
-
-	updateButtonStates() {
-		if (this.searchBtn && this.backlinksBtn) {
-			if (this.mode === 'search') {
-				this.searchBtn.addClass('active');
-				this.backlinksBtn.removeClass('active');
-			} else {
-				this.searchBtn.removeClass('active');
-				this.backlinksBtn.addClass('active');
-			}
-		}
-	}
-	
-	// Auto-select first result when results are available
-	autoSelectFirst() {
-		if (this.plugin.resultsCache.length > 0 && this.plugin.selectedIndex === 0 && !this.plugin.currentFile) {
-			// Automatically select and display the first result
-			// Only if Navigation View is active to avoid opening new tabs
-			if (this.plugin.navigationView && this.plugin.navigationLeaf) {
-				const isActive = this.plugin.app.workspace.getActiveViewOfType(NavigationView) === this;
-				if (isActive) {
-					this.plugin.currentFile = this.plugin.resultsCache[0];
-					this.plugin.updatePreview(this.plugin.resultsCache[0], this.plugin.currentViewType || 'search');
-					this.updateDisplay();
-				}
-			}
-		}
-	}
-
-	updateDisplay() {
-		// Auto-select first result if available
-		this.autoSelectFirst();
-		
-		const resultsContainer = this.contentEl.querySelector('.nav-results') as HTMLElement;
-		if (!resultsContainer) return;
-		
-		resultsContainer.empty();
-		
-		// Show current file content if available
-		const currentFile = this.plugin.getCurrentFile();
-		if (currentFile) {
-			this.displayFileContent(resultsContainer, currentFile);
-		} else {
-			// Show instructions
-			if (this.mode === 'search') {
-				resultsContainer.createEl('p', { 
-					text: 'Open search (Ctrl/Cmd+Shift+F) and use Ctrl/Cmd+↑↓ to navigate',
-					cls: 'nav-instructions'
-				});
-			} else {
-				if (this.targetFile) {
-					resultsContainer.createEl('p', { 
-						text: `Use Ctrl/Cmd+↑↓ to navigate backlinks, Ctrl/Cmd+Enter to open in new tab`,
-						cls: 'nav-instructions'
-					});
-				} else {
-					resultsContainer.createEl('p', { 
-						text: 'Click on a note to view its backlinks here',
-						cls: 'nav-instructions'
-					});
-				}
-			}
-		}
-	}
-
-	async displayFileContent(container: HTMLElement, file: TFile) {
-		container.empty();
-		
-		// Create sticky file title header at the top
-		const fileHeader = container.createDiv('nav-file-header');
-		fileHeader.style.position = 'sticky';
-		fileHeader.style.top = '0';
-		fileHeader.style.zIndex = '100';
-		fileHeader.style.padding = '12px';
-		fileHeader.style.borderBottom = '2px solid var(--background-modifier-border)';
-		fileHeader.style.background = 'var(--background-primary)';
-		fileHeader.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-		fileHeader.style.marginBottom = '10px';
-		fileHeader.style.marginTop = '0';
-		
-		const fileName = fileHeader.createEl('h4', { text: file.basename });
-		fileName.style.margin = '0';
-		fileName.style.fontSize = '16px';
-		fileName.style.fontWeight = '600';
-		fileName.style.color = 'var(--text-normal)';
-		
-		// Show file path as subtitle
-		const filePath = fileHeader.createEl('div', { text: file.path });
-		filePath.style.fontSize = '11px';
-		filePath.style.color = 'var(--text-muted)';
-		filePath.style.marginTop = '4px';
-		
-		// Show context if in backlinks mode
-		if (this.mode === 'backlinks' && this.targetFile) {
-			const contextInfo = fileHeader.createEl('div', { 
-				text: `Backlinks for: ${this.targetFile.basename}`,
-				cls: 'nav-context-info'
-			});
-			contextInfo.style.fontSize = '11px';
-			contextInfo.style.color = 'var(--text-muted)';
-			contextInfo.style.marginTop = '4px';
-			contextInfo.style.fontStyle = 'italic';
-		}
-		
-		// Create content area that will hold the embedded note view
-		const contentArea = container.createDiv('nav-file-content');
-		contentArea.style.flex = '1';
-		contentArea.style.display = 'flex';
-		contentArea.style.flexDirection = 'column';
-		contentArea.style.overflow = 'hidden';
-		contentArea.style.minHeight = '400px';
-		
-		// Use the plugin's preview leaf and display it here
-		try {
-			// Get or create the preview leaf
-			if (!this.plugin.previewLeaf || !this.plugin.previewLeaf.view) {
-				// Use 'split' to avoid creating a visible tab
-				this.plugin.previewLeaf = this.plugin.app.workspace.getLeaf('split');
-			}
-			
-			// Open the file in the preview leaf (but don't activate it)
-			await this.plugin.previewLeaf.openFile(file, { active: false });
-			
-			// Get the markdown view
-			const markdownView = this.plugin.previewLeaf.view as MarkdownView;
-			if (markdownView) {
-				// Get the view's content element
-				const viewContent = markdownView.contentEl;
-				viewContent.style.height = '100%';
-				viewContent.style.flex = '1';
-				
-				// Move the view content into our container
-				contentArea.appendChild(viewContent);
-				
-				// Set edit mode by default
-				if (markdownView.getMode() === 'preview') {
-					// Force to source/edit mode
-					(markdownView as any).setMode?.('source');
-				}
-				
-				// Store reference
-				this.embeddedLeaf = this.plugin.previewLeaf;
-			}
-		} catch (error) {
-			// Fallback: create a simple text display
-			console.error('Error creating embedded view:', error);
-			contentArea.createEl('p', { 
-				text: `Error displaying file: ${error}`,
-				cls: 'nav-error'
-			});
-		}
-	}
-	
 	async onClose() {
-		// Don't detach the preview leaf - it's shared with the plugin
-		// Just clean up our reference
-		this.embeddedLeaf = null;
-		this.contentEl.empty();
+		this.targetFile = null;
+		if (this.plugin.searchTabBacklinksView === this) {
+			this.plugin.searchTabBacklinksView = null;
+		}
 	}
 }
 
 export default class SearchShortlistPlugin extends Plugin {
-	public resultsCache: TFile[] = [];
-	private resultElements: HTMLElement[] = []; // Store DOM elements for highlighting
-	public selectedIndex: number = 0;
-	public previewLeaf: WorkspaceLeaf | null = null;
-	public navigationLeaf: WorkspaceLeaf | null = null;
-	public navigationView: NavigationView | null = null;
-	public currentViewType: ViewType = null;
-	private originalBacklinksFile: TFile | null = null; // Track which file's backlinks we're viewing
-	private highlightedElement: HTMLElement | null = null; // Track currently highlighted element
-	public currentFile: TFile | null = null; // Current file being displayed
+	searchResultsCache: TFile[] = [];
+	resultElements: HTMLElement[] = [];
+	selectedIndex: number = -1;
+	searchTabView: SearchTabView | null = null;
+	searchTabBacklinksView: SearchTabBacklinksView | null = null;
+	highlightedElement: HTMLElement | null = null;
+	currentMode: 'search' | 'backlinks' = 'search';
 
-	getCurrentFile(): TFile | null {
-		return this.currentFile;
-	}
-
-	setViewType(viewType: ViewType, targetFile?: TFile) {
-		this.currentViewType = viewType;
-		if (viewType === 'backlinks' && targetFile) {
-			this.originalBacklinksFile = targetFile;
-		}
-		// Update results when switching modes
-		this.updateResults();
-	}
+	// Track state per mode
+	searchModeIndex: number = -1;
+	backlinksModeIndex: number = -1;
+	lastSearchHash: string = '';
+	lastBacklinksHash: string = '';
 
 	async onload() {
-		console.log('🔍 Loading Search Tab Plugin');
-		
-		// Register the navigation view
-		this.registerView(NAVIGATION_VIEW_TYPE, (leaf) => {
-			this.navigationView = new NavigationView(leaf, this);
-			this.navigationLeaf = leaf;
-			return this.navigationView;
+		console.log('Loading Search Tab Plugin');
+
+		// Register the Search Tab view
+		this.registerView(
+			SEARCH_TAB_VIEW_TYPE,
+			(leaf) => {
+				const view = new SearchTabView(leaf, this);
+				this.searchTabView = view;
+				return view;
+			}
+		);
+
+		// Register the Search Tab Backlinks view
+		this.registerView(
+			SEARCH_TAB_BACKLINKS_VIEW_TYPE,
+			(leaf) => {
+				const view = new SearchTabBacklinksView(leaf, this);
+				this.searchTabBacklinksView = view;
+				return view;
+			}
+		);
+
+		// Watch for search/backlinks updates
+		this.registerEvent(
+			this.app.workspace.on('layout-change', () => {
+				this.updateSearchResults();
+			})
+		);
+
+		// Add DOM event handler for Cmd+Enter in input fields (like search bar)
+		this.registerDomEvent(document, 'keydown', async (evt: KeyboardEvent) => {
+			// Only handle Cmd/Ctrl+Enter
+			if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey)) {
+				// Check if we're in an input or textarea (like the search bar)
+				const target = evt.target as HTMLElement;
+				if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+					// Only prevent default and handle if we have results
+					if (this.searchResultsCache.length > 0) {
+						// If no result selected yet, select the first one and display it
+						if (this.selectedIndex < 0) {
+							await this.setIndexAndHighlight(0);
+						}
+						evt.preventDefault();
+						evt.stopPropagation();
+						await this.openInNewTab(false);
+					}
+				}
+			}
 		});
-		
-		// Add command to open search tab
+
+		// Command to open Search Tab
 		this.addCommand({
 			id: 'open-search-tab',
 			name: 'Open Search Tab',
 			callback: () => {
-				this.activateNavigationView();
+				this.activateSearchTab();
 			}
 		});
-		
-		// Search Tab commands (names don't include "Search Tab:" prefix - Obsidian adds plugin name automatically)
+
 		this.addCommand({
 			id: 'navigate-next',
-			name: 'Navigate to Next Result',
+			name: 'Navigate to next result',
+			hotkeys: [{ modifiers: ["Mod"], key: "ArrowDown" }],
 			callback: async () => {
-				if (this.navigationView && this.navigationLeaf) {
-					const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-					if (isActive) {
-						await this.navigate(1, this.currentViewType || 'search');
-					}
-				}
+				await this.navigate(1);
 			}
 		});
-		
+
 		this.addCommand({
 			id: 'navigate-previous',
-			name: 'Navigate to Previous Result',
+			name: 'Navigate to previous result',
+			hotkeys: [{ modifiers: ["Mod"], key: "ArrowUp" }],
 			callback: async () => {
-				if (this.navigationView && this.navigationLeaf) {
-					const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-					if (isActive) {
-						await this.navigate(-1, this.currentViewType || 'search');
-					}
-				}
+				await this.navigate(-1);
 			}
 		});
-		
+
 		this.addCommand({
-			id: 'open-new-tab-keep-focus',
-			name: 'Open Current Result in New Tab (Keep Focus)',
-			callback: async () => {
-				if (this.navigationView && this.navigationLeaf) {
-					const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-					if (isActive) {
-						await this.openInNewTab(this.currentViewType || 'search');
-					}
+			id: 'open-in-new-tab',
+			name: 'Open current result in new tab (keep focus)',
+			hotkeys: [{ modifiers: ["Mod"], key: "Enter" }],
+			checkCallback: (checking: boolean) => {
+				// Always allow the command to run
+				if (!checking) {
+					this.openInNewTab(false);
 				}
+				return true;
 			}
 		});
-		
+
 		this.addCommand({
-			id: 'open-new-tab-switch-focus',
-			name: 'Open Current Result in New Tab (Switch Focus)',
-			callback: async () => {
-				if (this.navigationView && this.navigationLeaf) {
-					const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-					if (isActive) {
-						await this.openInNewTabAndFocus(this.currentViewType || 'search');
-					}
+			id: 'open-in-new-tab-and-focus',
+			name: 'Open current result in new tab (switch focus)',
+			checkCallback: (checking: boolean) => {
+				// Always allow the command to run
+				if (!checking) {
+					this.openInNewTab(true);
 				}
+				return true;
 			}
 		});
-		
-		this.addCommand({
-			id: 'open-split-pane',
-			name: 'Open Current Result in Split Pane',
-			callback: async () => {
-				if (this.navigationView && this.navigationLeaf) {
-					const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-					if (isActive) {
-						await this.openToSide(this.currentViewType || 'search');
-					}
-				}
-			}
-		});
-		
+
 		this.addCommand({
 			id: 'switch-to-search-mode',
-			name: 'Switch to Search Mode',
+			name: 'Switch to Search mode',
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "s" }],
 			callback: () => {
-				if (this.navigationView) {
-					this.navigationView.setMode('search');
-					this.setViewType('search');
+				if (this.searchTabView) {
+					this.searchTabView.setMode('search');
 				}
 			}
 		});
-		
+
 		this.addCommand({
 			id: 'switch-to-backlinks-mode',
-			name: 'Switch to Backlinks Mode',
-			callback: async () => {
-				if (this.navigationView) {
-					const activeLeaf = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (activeLeaf && activeLeaf.file) {
-						this.navigationView.setMode('backlinks', activeLeaf.file);
-						this.setViewType('backlinks', activeLeaf.file);
-					} else {
-						this.navigationView.setMode('backlinks');
-						this.setViewType('backlinks');
-					}
+			name: 'Switch to Backlinks mode',
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "b" }],
+			callback: () => {
+				if (this.searchTabView) {
+					this.searchTabView.setMode('backlinks');
 				}
 			}
 		});
-		
-		// Try to restore navigation view if it was open
-		this.app.workspace.onLayoutReady(() => {
-			const leaves = this.app.workspace.getLeavesOfType(NAVIGATION_VIEW_TYPE);
-			if (leaves.length > 0) {
-				this.navigationLeaf = leaves[0];
-				this.navigationView = leaves[0].view as unknown as NavigationView;
+
+		// Command to open Search Tab Backlinks panel
+		this.addCommand({
+			id: 'open-search-tab-backlinks',
+			name: 'Open Search Tab Backlinks',
+			callback: () => {
+				this.activateSearchTabBacklinks();
 			}
 		});
 
-		// Register keyboard event handler for search and backlinks panels
-		this.registerDomEvent(document, 'keydown', async (evt: KeyboardEvent) => {
-			try {
-				// Only handle Ctrl/Cmd+arrow keys and Ctrl/Cmd+Enter
-				// Regular arrows should work for editing the note
-				const isCtrlArrow = (evt.key === 'ArrowDown' || evt.key === 'ArrowUp') && (evt.ctrlKey || evt.metaKey);
-				const isCtrlEnter = evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey);
-				
-				if (!isCtrlArrow && !isCtrlEnter) {
-					return;
+		// Command to sync native backlinks panel to Search Tab file
+		this.addCommand({
+			id: 'sync-backlinks-to-search-tab',
+			name: 'Sync backlinks to Search Tab file',
+			hotkeys: [{ modifiers: ["Mod", "Shift"], key: "l" }],
+			checkCallback: (checking: boolean) => {
+				// Only enable if Search Tab is open and has a file
+				const hasFile = this.searchTabView && this.searchTabView.currentFile;
+				if (checking) {
+					return !!hasFile;
 				}
-				
-				// Check for search view first
-			const searchView = this.getSearchView();
-				const backlinksView = this.getBacklinksView();
 
-				let activeView: View | null = null;
-				let viewType: ViewType = null;
-
-			const activeElement = document.activeElement;
-			
-				// Check if search view exists and has results
-				if (searchView) {
-					const searchContainer = searchView.containerEl;
-					if (searchContainer) {
-						// Check if focus is in search, or if search results are visible
-						const hasFocus = searchContainer.contains(activeElement);
-						const hasResults = searchContainer.querySelector('.tree-item-self, .tree-item');
-						
-						if (hasFocus || hasResults) {
-							activeView = searchView;
-							viewType = 'search';
-							console.log('🔍 Search view detected', { hasFocus, hasResults: !!hasResults });
-						}
-					}
+				if (hasFile) {
+					this.syncBacklinksToSearchTabFile();
 				}
-				
-				// Check if backlinks view exists and has results
-				if (!activeView && backlinksView) {
-					const backlinksContainer = backlinksView.containerEl;
-					if (backlinksContainer) {
-						// Check if focus is in backlinks, or if backlinks are visible
-						const hasFocus = backlinksContainer.contains(activeElement);
-						const hasResults = backlinksContainer.querySelector('.tree-item-self, .tree-item');
-						
-						if (hasFocus || hasResults) {
-							activeView = backlinksView;
-							viewType = 'backlinks';
-							console.log('🔗 Backlinks view detected', { hasFocus, hasResults: !!hasResults });
-						}
-					}
-				}
-				
-				// Only handle if Navigation View is active AND we have search/backlinks
-				const isNavigationViewActive = this.navigationLeaf && 
-					this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-				
-				if (!isNavigationViewActive) {
-					// Only allow navigation when Navigation View is active
-					return;
-				}
-				
-				// If Navigation View is active, check the mode and allow navigation
-				if (this.navigationView) {
-					const navMode = this.navigationView.mode;
-					if (navMode === 'backlinks' && this.currentViewType === 'backlinks') {
-						// In backlinks mode, allow navigation if we have cached results
-						if (this.resultsCache.length > 0) {
-							viewType = 'backlinks';
-							// Don't require activeView for backlinks if we have cached results
-							if (!activeView) {
-								activeView = backlinksView || null;
-							}
-						}
-					} else if (navMode === 'search' && !viewType) {
-						// In search mode, require search view
-						if (searchView) {
-							viewType = 'search';
-							activeView = searchView;
-						}
-					}
-				}
-				
-				// Only handle if we have an active view or cached results for backlinks
-				if (!viewType || (!activeView && this.resultsCache.length === 0)) {
-					// Debug: log when we have arrow keys but no view
-					if (isCtrlArrow) {
-						console.log('⚠️ Ctrl/Cmd+Arrow pressed but no active search/backlinks view found');
-						console.log('   Search view exists:', !!searchView);
-						console.log('   Backlinks view exists:', !!backlinksView);
-						console.log('   Navigation View mode:', this.navigationView?.mode);
-						console.log('   Cached results:', this.resultsCache.length);
-					}
-					return;
-				}
-				
-				// Don't interfere if user is typing in a textarea or input
-				// We'll check this more carefully in the individual handlers
-				if (activeElement instanceof HTMLTextAreaElement || activeElement instanceof HTMLInputElement) {
-					// Only allow Ctrl/Cmd+arrows if we're in the Navigation View's content
-					if (isCtrlArrow && this.navigationView && this.navigationView.contentEl.contains(activeElement)) {
-						// Allow it - we'll check more carefully in the handler
-					} else {
-						return;
-					}
-				}
-				
-				this.currentViewType = viewType;
-				
-				// Handle Ctrl/Cmd+arrow down (navigate to next note)
-				// Only handle if Navigation View is active and we're not in a text input
-				if (evt.key === 'ArrowDown' && (evt.ctrlKey || evt.metaKey) && !evt.shiftKey && !evt.altKey) {
-					// Check if we're in a text input - if so, don't interfere
-					const target = evt.target as HTMLElement;
-					if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-						return; // Let the browser handle it
-					}
-					evt.preventDefault();
-					evt.stopPropagation();
-					evt.stopImmediatePropagation();
-					await this.navigate(1, viewType);
-					return;
-				}
-				
-				// Handle Ctrl/Cmd+arrow up (navigate to previous note)
-				// Only handle if Navigation View is active and we're not in a text input
-				if (evt.key === 'ArrowUp' && (evt.ctrlKey || evt.metaKey) && !evt.shiftKey && !evt.altKey) {
-					// Check if we're in a text input - if so, don't interfere
-					const target = evt.target as HTMLElement;
-					if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-						return; // Let the browser handle it
-					}
-					evt.preventDefault();
-					evt.stopPropagation();
-					evt.stopImmediatePropagation();
-					await this.navigate(-1, viewType);
-					return;
-				}
-				
-				// Handle Ctrl/Cmd+Enter
-				if (evt.key === 'Enter' && (evt.ctrlKey || evt.metaKey) && !evt.shiftKey && !evt.altKey) {
-					// Check if we're in a text input - if so, don't interfere
-					const target = evt.target as HTMLElement;
-					if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
-						return; // Let the browser handle it
-					}
-					evt.preventDefault();
-					evt.stopPropagation();
-					evt.stopImmediatePropagation();
-					await this.openInNewTab(viewType);
-					return;
-				}
-			} catch (error) {
-				console.error('Search Tab Plugin error:', error);
+				return true;
 			}
 		});
 
-		// Watch for view updates
-		this.registerEvent(
-			this.app.workspace.on('layout-change', () => {
-				this.updateResults();
-			})
-		);
+		console.log('Search Tab Plugin loaded');
+	}
 
-		// Also watch for when views are opened/changed
-		this.registerEvent(
-			this.app.workspace.on('active-leaf-change', () => {
-				this.updateResults();
-			})
-		);
+	async activateSearchTab() {
+		const { workspace } = this.app;
 
-		console.log('✅ Search Tab Plugin loaded successfully');
-		console.log('📝 Keyboard Shortcuts:');
-		console.log('   - Open Search Tab: Cmd/Ctrl+P -> "Open Search Tab"');
-		console.log('   - Navigate Next: Cmd/Ctrl+↓ (or use command "Navigate to Next Result")');
-		console.log('   - Navigate Previous: Cmd/Ctrl+↑ (or use command "Navigate to Previous Result")');
-		console.log('   - Open in New Tab (Keep Focus): Cmd/Ctrl+Enter (or use command "Open Current Result in New Tab (Keep Focus)")');
-		console.log('   - Open in New Tab (Switch Focus): Use command "Open Current Result in New Tab (Switch Focus)")');
-		console.log('   - Open in Split Pane: Use command "Open Current Result in Split Pane"');
-		console.log('   - Switch to Search: Use command "Switch to Search Mode"');
-		console.log('   - Switch to Backlinks: Use command "Switch to Backlinks Mode"');
-		console.log('   - Note: All commands can be customized in Settings > Hotkeys');
+		// Check if view is already open
+		let leaf: WorkspaceLeaf | null = null;
+		const leaves = workspace.getLeavesOfType(SEARCH_TAB_VIEW_TYPE);
+		const isNewView = leaves.length === 0;
+
+		if (leaves.length > 0) {
+			// View already exists, just reveal it
+			leaf = leaves[0];
+			// Update the plugin reference to this view
+			const view = leaf.view as SearchTabView;
+			if (view) {
+				this.searchTabView = view;
+			}
+		} else {
+			// Create new tab in main editor area
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({
+				type: SEARCH_TAB_VIEW_TYPE,
+				active: true
+			});
+			// The registerView callback will set this.searchTabView
+		}
+
+		if (leaf) {
+			workspace.revealLeaf(leaf);
+		}
+
+		// Auto-open first result when Search Tab is first created
+		if (isNewView) {
+			setTimeout(() => {
+				this.updateSearchResults();
+				// Navigate to first result
+				if (this.searchResultsCache.length > 0) {
+					this.navigate(1); // This will go from -1 to 0
+				}
+			}, 100);
+		}
+	}
+
+	async activateSearchTabBacklinks() {
+		const { workspace } = this.app;
+
+		// Check if view is already open
+		let leaf: WorkspaceLeaf | null = null;
+		const leaves = workspace.getLeavesOfType(SEARCH_TAB_BACKLINKS_VIEW_TYPE);
+
+		if (leaves.length > 0) {
+			// View already exists, just reveal it
+			leaf = leaves[0];
+			// Update the plugin reference to this view
+			const view = leaf.view as SearchTabBacklinksView;
+			if (view) {
+				this.searchTabBacklinksView = view;
+			}
+		} else {
+			// Create new leaf in right sidebar
+			leaf = workspace.getRightLeaf(false);
+			if (leaf) {
+				await leaf.setViewState({
+					type: SEARCH_TAB_BACKLINKS_VIEW_TYPE,
+					active: true
+				});
+			}
+			// The registerView callback will set this.searchTabBacklinksView
+		}
+
+		if (leaf) {
+			workspace.revealLeaf(leaf);
+		}
+	}
+
+	async syncBacklinksToSearchTabFile() {
+		// Get the current file from Search Tab
+		if (this.searchTabView && this.searchTabView.currentFile) {
+			const currentFile = this.searchTabView.currentFile;
+
+			// Open the file in a regular leaf so the native backlinks panel updates
+			// Check if there's already a leaf with this file open (excluding Search Tab's embedded leaf)
+			const existingLeaf = this.findLeafWithFile(currentFile);
+
+			if (existingLeaf) {
+				// File is already open, just make it active
+				this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+			} else {
+				// Open in a new tab
+				const newLeaf = this.app.workspace.getLeaf('tab');
+				await newLeaf.openFile(currentFile);
+				this.app.workspace.setActiveLeaf(newLeaf, { focus: true });
+			}
+		}
 	}
 
 	getSearchView(): View | null {
@@ -627,529 +667,436 @@ export default class SearchShortlistPlugin extends Plugin {
 		return null;
 	}
 
-	updateResults() {
-		// Try to update based on current view type, or detect it
-		if (this.currentViewType === 'search') {
+	getResultsHash(results: TFile[]): string {
+		// Create a hash of the file paths to detect changes
+		return results.map(f => f.path).join('|');
+	}
+
+	updateSearchResults() {
+		let results: TFile[] = [];
+		let elements: HTMLElement[] = [];
+
+		// Use the current mode from Search Tab view
+		if (this.currentMode === 'search') {
 			const searchView = this.getSearchView();
 			if (searchView) {
-				const { files, elements } = this.extractSearchResults(searchView);
-				this.resultsCache = files;
-				this.resultElements = elements;
-				if (this.selectedIndex >= this.resultsCache.length) {
-					this.selectedIndex = 0;
-				}
-				// Auto-select first result if Navigation View is open and active, and no file is displayed
-				if (this.navigationView && this.navigationLeaf) {
-					const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-					if (isActive && this.resultsCache.length > 0 && !this.currentFile) {
-						this.navigationView.autoSelectFirst();
-					}
-				}
-				return;
+				const extracted = this.extractSearchResults(searchView);
+				results = extracted.files;
+				elements = extracted.elements;
 			}
-		}
-		
-		if (this.currentViewType === 'backlinks') {
+		} else if (this.currentMode === 'backlinks') {
 			const backlinksView = this.getBacklinksView();
-			
-			// If we have an original file but no backlinks view, try to get backlinks from metadata
-			if (!backlinksView && this.originalBacklinksFile) {
-				// Get backlinks from metadata cache
-				const metadata = this.app.metadataCache.getFileCache(this.originalBacklinksFile);
-				if (metadata) {
-					const backlinkFiles: TFile[] = [];
-					const backlinkElements: HTMLElement[] = [];
-					
-					// Get all files that link to this file
-					const allFiles = this.app.vault.getMarkdownFiles();
-					for (const file of allFiles) {
-						const fileMetadata = this.app.metadataCache.getFileCache(file);
-						if (fileMetadata) {
-							// Check if this file links to our target file
-							const linksToTarget = fileMetadata.links?.some(link => 
-								link.link === this.originalBacklinksFile!.basename ||
-								link.link === this.originalBacklinksFile!.name ||
-								file.path.includes(this.originalBacklinksFile!.basename)
-							);
-							
-							if (linksToTarget) {
-								backlinkFiles.push(file);
-								// Create a dummy element for highlighting
-								const dummyEl = document.createElement('div');
-								backlinkElements.push(dummyEl);
-							}
-						}
-					}
-					
-					this.resultsCache = backlinkFiles;
-					this.resultElements = backlinkElements;
-					if (this.selectedIndex >= this.resultsCache.length) {
-						this.selectedIndex = 0;
-					}
-					return;
-				}
-			}
-			
 			if (backlinksView) {
-				// Check if we need to capture the original file
-				if (!this.originalBacklinksFile) {
-					// Try to get the current file from the active leaf
-					const activeLeaf = this.app.workspace.getActiveViewOfType(MarkdownView);
-					if (activeLeaf) {
-						this.originalBacklinksFile = activeLeaf.file;
-					}
-				}
-				
-				const { files, elements } = this.extractBacklinks(backlinksView);
-				this.resultsCache = files;
-				this.resultElements = elements;
-				if (this.selectedIndex >= this.resultsCache.length) {
-					this.selectedIndex = 0;
-				}
-				return;
+				const extracted = this.extractBacklinksResults(backlinksView);
+				results = extracted.files;
+				elements = extracted.elements;
 			}
-		}
-		
-		// Auto-detect if no current view type
-		const searchView = this.getSearchView();
-		if (searchView) {
-			const { files, elements } = this.extractSearchResults(searchView);
-			this.resultsCache = files;
-			this.resultElements = elements;
-			this.currentViewType = 'search';
-			this.originalBacklinksFile = null; // Reset for search
-			// Update navigation view if it exists
-			if (this.navigationView) {
-				this.navigationView.setMode('search');
-			}
-			if (this.selectedIndex >= this.resultsCache.length) {
-				this.selectedIndex = 0;
-			}
-			return;
 		}
 
-		const backlinksView = this.getBacklinksView();
-		if (backlinksView) {
-			// Capture the original file when first detecting backlinks
-			const activeLeaf = this.app.workspace.getActiveViewOfType(MarkdownView);
-			if (activeLeaf) {
-				this.originalBacklinksFile = activeLeaf.file;
+		// Compute hash to detect if results changed
+		const currentHash = this.getResultsHash(results);
+		const previousHash = this.currentMode === 'search' ? this.lastSearchHash : this.lastBacklinksHash;
+		const resultsChanged = currentHash !== previousHash;
+
+		// Update hash
+		if (this.currentMode === 'search') {
+			this.lastSearchHash = currentHash;
+		} else {
+			this.lastBacklinksHash = currentHash;
+		}
+
+		// Clear all highlights before updating (to prevent duplicates when elements are cloned)
+		this.clearAllHighlights();
+
+		this.searchResultsCache = results;
+		this.resultElements = elements;
+
+		if (resultsChanged) {
+			// Results changed - reset to 0 (ready for first Cmd+Down to go to index 0)
+			this.selectedIndex = -1;
+			if (this.currentMode === 'search') {
+				this.searchModeIndex = -1;
+			} else {
+				this.backlinksModeIndex = -1;
 			}
-			
-			const { files, elements } = this.extractBacklinks(backlinksView);
-			this.resultsCache = files;
-			this.resultElements = elements;
-			this.currentViewType = 'backlinks';
-			if (this.selectedIndex >= this.resultsCache.length) {
-				this.selectedIndex = 0;
+		} else {
+			// Results didn't change - restore the saved index for this mode
+			if (this.currentMode === 'search') {
+				this.selectedIndex = this.searchModeIndex;
+			} else {
+				this.selectedIndex = this.backlinksModeIndex;
 			}
-			// Auto-select first result if Navigation View is open and active, and no file is displayed
-			if (this.navigationView && this.navigationLeaf) {
-				const isActive = this.app.workspace.getActiveViewOfType(NavigationView) === this.navigationView;
-				if (isActive && this.resultsCache.length > 0 && !this.currentFile) {
-					this.navigationView.autoSelectFirst();
+
+			// Clamp to valid range
+			if (this.selectedIndex >= results.length) {
+				this.selectedIndex = Math.max(0, results.length - 1);
+			}
+		}
+
+		// Attach click handlers to result elements
+		this.attachClickHandlersToResults();
+
+		// Re-highlight the current selection if there is one
+		if (this.selectedIndex >= 0 && this.resultElements[this.selectedIndex]) {
+			this.highlightElement(this.resultElements[this.selectedIndex]);
+		}
+	}
+
+	attachClickHandlersToResults() {
+		// Attach click handlers to each result element
+		this.resultElements.forEach((element, index) => {
+			// Check if we've already attached a handler to this element
+			if ((element as any).__searchTabHandlerAttached) {
+				return;
+			}
+
+			// Mark this element as having a handler
+			(element as any).__searchTabHandlerAttached = true;
+
+			// Add click handler
+			element.addEventListener('click', async (evt: MouseEvent) => {
+				// Check if Cmd/Ctrl key is pressed
+				if (evt.metaKey || evt.ctrlKey) {
+					// Open in new tab
+					evt.preventDefault();
+					evt.stopPropagation();
+					
+					// Find the current index (in case the array has changed)
+					const currentIndex = this.resultElements.indexOf(element);
+					const file = this.searchResultsCache[currentIndex];
+					if (file) {
+						const newLeaf = this.app.workspace.getLeaf('tab');
+						await newLeaf.openFile(file);
+					}
+				} else {
+					// Navigate to this result in Search Tab
+					evt.preventDefault();
+					evt.stopPropagation();
+					
+					// Find the current index (in case the array has changed)
+					const currentIndex = this.resultElements.indexOf(element);
+					if (currentIndex >= 0) {
+						await this.setIndexAndHighlight(currentIndex);
+					}
+				}
+			});
+		});
+	}
+
+	extractSearchResults(searchView: View): { files: TFile[], elements: HTMLElement[] } {
+		const files: TFile[] = [];
+		const elements: HTMLElement[] = [];
+
+		// Access the search results through the view's DOM
+		const searchResultsEl = searchView.containerEl.querySelector('.search-results-children');
+		if (!searchResultsEl) {
+			return { files, elements };
+		}
+
+		// Find all result items
+		const resultItems = searchResultsEl.querySelectorAll('.tree-item-self');
+		resultItems.forEach((item: Element) => {
+			const titleEl = item.querySelector('.tree-item-inner');
+			if (titleEl) {
+				const fileName = titleEl.textContent?.trim();
+				if (fileName) {
+					// Find the file in the vault
+					const file = this.app.vault.getMarkdownFiles().find(f =>
+						f.basename === fileName || f.path.endsWith(fileName)
+					);
+					if (file) {
+						files.push(file);
+						elements.push(item as HTMLElement);
+					}
 				}
 			}
-			return;
+		});
+
+		return { files, elements };
+	}
+
+	async getBacklinksForFile(targetFile: TFile): Promise<Array<{ file: TFile; isLinked: boolean }>> {
+		// Use MetadataCache to get linked mentions
+		const backlinks: Array<{ file: TFile; isLinked: boolean }> = [];
+		const resolvedLinks = this.app.metadataCache.resolvedLinks;
+		const seenFiles = new Set<string>();
+
+		// Get linked mentions (explicit links using [[ ]])
+		for (const sourcePath in resolvedLinks) {
+			const links = resolvedLinks[sourcePath];
+			// Check if this file links to our target
+			if (links[targetFile.path]) {
+				const sourceFile = this.app.vault.getAbstractFileByPath(sourcePath);
+				if (sourceFile instanceof TFile) {
+					backlinks.push({ file: sourceFile, isLinked: true });
+					seenFiles.add(sourceFile.path);
+				}
+			}
 		}
+
+		// Get unlinked mentions (text mentions of the file name without [[ ]])
+		// We need to search file contents for the target file's basename
+		const targetBasename = targetFile.basename;
+		const allFiles = this.app.vault.getMarkdownFiles();
 		
-		// No active view
-		this.resultsCache = [];
-		this.resultElements = [];
-		this.currentViewType = null;
-		this.originalBacklinksFile = null;
+		for (const file of allFiles) {
+			// Skip if already counted as linked mention
+			if (seenFiles.has(file.path)) {
+				continue;
+			}
+			
+			// Skip the target file itself
+			if (file.path === targetFile.path) {
+				continue;
+			}
+			
+			try {
+				const content = await this.app.vault.cachedRead(file);
+				// Simple check: does the content contain the basename as a word?
+				// Use word boundaries to avoid partial matches
+				const regex = new RegExp(`\\b${targetBasename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+				if (regex.test(content)) {
+					backlinks.push({ file: file, isLinked: false });
+					seenFiles.add(file.path);
+				}
+			} catch (e) {
+				// Ignore files we can't read
+			}
+		}
+
+		return backlinks;
+	}
+
+	extractBacklinksResults(backlinksView: View): { files: TFile[], elements: HTMLElement[] } {
+		const files: TFile[] = [];
+		const elements: HTMLElement[] = [];
+
+		// Access the backlinks through the view's DOM
+		const backlinksContainer = backlinksView.containerEl.querySelector('.backlink-pane');
+		if (!backlinksContainer) {
+			return { files, elements };
+		}
+
+		// Find all backlink file items (they have class search-result-file-title)
+		const resultItems = backlinksContainer.querySelectorAll('.search-result-file-title');
+		resultItems.forEach((item: Element) => {
+			const titleEl = item.querySelector('.tree-item-inner');
+			if (titleEl) {
+				const fileName = titleEl.textContent?.trim();
+				if (fileName) {
+					// Find the file in the vault
+					const file = this.app.vault.getMarkdownFiles().find(f =>
+						f.basename === fileName || f.path.endsWith(fileName)
+					);
+					if (file) {
+						files.push(file);
+						elements.push(item as HTMLElement);
+					}
+				}
+			}
+		});
+
+		return { files, elements };
 	}
 
 	clearHighlight() {
 		if (this.highlightedElement) {
 			this.highlightedElement.style.backgroundColor = '';
 			this.highlightedElement.style.outline = '';
+			this.highlightedElement.style.outlineOffset = '';
 			this.highlightedElement = null;
 		}
+	}
+
+	clearAllHighlights() {
+		// Clear highlights on all result elements (used when refreshing the list)
+		this.resultElements.forEach(element => {
+			if (element) {
+				element.style.backgroundColor = '';
+				element.style.outline = '';
+				element.style.outlineOffset = '';
+			}
+		});
+		this.highlightedElement = null;
 	}
 
 	highlightElement(element: HTMLElement) {
 		// Clear previous highlight
 		this.clearHighlight();
-		
+
 		// Add highlight
-		element.style.backgroundColor = 'var(--background-modifier-hover, rgba(155, 155, 155, 0.1))';
-		element.style.outline = '2px solid var(--interactive-accent, #7f6df2)';
+		element.style.backgroundColor = 'var(--background-modifier-hover)';
+		element.style.outline = '2px solid var(--interactive-accent)';
 		element.style.outlineOffset = '-2px';
 		this.highlightedElement = element;
-		
+
 		// Scroll into view
 		element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 	}
 
-	extractSearchResults(searchView: View): { files: TFile[], elements: HTMLElement[] } {
-		const results: TFile[] = [];
-		const elements: HTMLElement[] = [];
-		
-		try {
-		// Access the search results through the view's DOM
-			// Try multiple possible selectors for different Obsidian versions
-			let searchResultsEl = searchView.containerEl.querySelector('.search-results-children');
-			if (!searchResultsEl) {
-				searchResultsEl = searchView.containerEl.querySelector('.search-result-container');
-			}
-			if (!searchResultsEl) {
-				searchResultsEl = searchView.containerEl.querySelector('.tree-item');
-			}
-			if (!searchResultsEl) {
-				// Try to find any result container
-				searchResultsEl = searchView.containerEl.querySelector('[class*="search"]');
-			}
-			
-		if (!searchResultsEl) {
-				return { files: results, elements };
-			}
+	async setIndexAndHighlight(index: number) {
+		// Update results cache first
+		this.updateSearchResults();
 
-			// Find all result items - try multiple selectors
-			let resultItems = searchResultsEl.querySelectorAll('.tree-item-self');
-			if (resultItems.length === 0) {
-				resultItems = searchResultsEl.querySelectorAll('.tree-item');
-			}
-			if (resultItems.length === 0) {
-				resultItems = searchResultsEl.querySelectorAll('[class*="result"]');
-			}
-
-			resultItems.forEach((item: Element) => {
-				try {
-					const itemEl = item as HTMLElement;
-					let titleEl = item.querySelector('.tree-item-inner');
-					if (!titleEl) {
-						titleEl = item.querySelector('.tree-item-inner-text');
-					}
-					if (!titleEl) {
-						titleEl = item as Element; // Use the item itself if no inner element
-					}
-					
-			if (titleEl) {
-				const fileName = titleEl.textContent?.trim();
-				if (fileName) {
-							// Find the file in the vault - try multiple matching strategies
-							let file = this.app.vault.getMarkdownFiles().find(f => 
-								f.basename === fileName || f.path.endsWith(fileName) || f.name === fileName
-							);
-							
-							// If not found, try without extension
-							if (!file && fileName.includes('.')) {
-								const nameWithoutExt = fileName.replace(/\.[^/.]+$/, '');
-								file = this.app.vault.getMarkdownFiles().find(f => 
-									f.basename === nameWithoutExt
-								);
-							}
-							
-					if (file) {
-						results.push(file);
-								elements.push(itemEl);
-							}
-						}
-					}
-				} catch (error) {
-					// Skip this item if there's an error
-					console.debug('Error processing search result item:', error);
-				}
-			});
-		} catch (error) {
-			console.error('Error extracting search results:', error);
-		}
-
-		return { files: results, elements };
-	}
-
-	extractBacklinks(backlinksView: View): { files: TFile[], elements: HTMLElement[] } {
-		const results: TFile[] = [];
-		const elements: HTMLElement[] = [];
-		
-		try {
-			// Access the backlinks through the view's DOM
-			// Based on HTML structure: .backlink-pane > .search-result-container > .search-results-children > .tree-item > .tree-item-self.search-result-file-title
-			const container = backlinksView.containerEl;
-			
-			// Find the backlink pane
-			const backlinkPane = container.querySelector('.backlink-pane');
-			if (!backlinkPane) {
-				console.log('No .backlink-pane found, trying fallback selectors');
-				// Fallback: try to find items directly
-				const allItems = container.querySelectorAll('.search-result-file-title, .tree-item-self.search-result-file-title');
-				allItems.forEach((item: Element) => {
-					this.processBacklinkItem(item as HTMLElement, results, elements);
-				});
-				return { files: results, elements };
-			}
-			
-			// Find all backlink file items - these are the actual files that link to the current note
-			// They're in: .search-result-file-title or .tree-item-self.search-result-file-title
-			const backlinkItems = backlinkPane.querySelectorAll('.search-result-file-title, .tree-item-self.search-result-file-title');
-			
-			console.log(`Found ${backlinkItems.length} backlink items in DOM`);
-
-			backlinkItems.forEach((item: Element) => {
-				this.processBacklinkItem(item as HTMLElement, results, elements);
-			});
-			
-			// Also try to get from search-result-container if we didn't find enough
-			if (results.length === 0) {
-				const searchContainers = backlinkPane.querySelectorAll('.search-result-container');
-				searchContainers.forEach((container: Element) => {
-					const items = container.querySelectorAll('.search-result-file-title, .tree-item-self.search-result-file-title');
-					items.forEach((item: Element) => {
-						this.processBacklinkItem(item as HTMLElement, results, elements);
-					});
-				});
-			}
-			
-		} catch (error) {
-			console.error('Error extracting backlinks:', error);
-		}
-
-		console.log(`Extracted ${results.length} backlink files`);
-		return { files: results, elements };
-	}
-
-	private processBacklinkItem(item: HTMLElement, results: TFile[], elements: HTMLElement[]): void {
-		try {
-			// Get the text from tree-item-inner
-			const titleEl = item.querySelector('.tree-item-inner');
-			if (!titleEl) return;
-			
-			const linkText = titleEl.textContent?.trim();
-			if (!linkText) return;
-			
-			// Skip section headers like "Linked mentions" and "Unlinked mentions"
-			if (linkText === 'Linked mentions' || linkText === 'Unlinked mentions') {
-				return;
-			}
-			
-			// Try to find the file - backlinks show the filename
-			let file = this.app.vault.getMarkdownFiles().find(f => 
-				f.basename === linkText || 
-				f.name === linkText ||
-				f.path.endsWith(linkText) ||
-				f.path === linkText
-			);
-			
-			// If not found, try without extension
-			if (!file && linkText.includes('.')) {
-				const nameWithoutExt = linkText.replace(/\.[^/.]+$/, '');
-				file = this.app.vault.getMarkdownFiles().find(f => 
-					f.basename === nameWithoutExt
-				);
-			}
-			
-			// Try to get file from data attributes
-			if (!file) {
-				const dataPath = item.getAttribute('data-path') || item.getAttribute('data-href');
-				if (dataPath) {
-					file = this.app.vault.getAbstractFileByPath(dataPath) as TFile;
-				}
-			}
-			
-			// Try getting from the item's click handler or data
-			if (!file) {
-				// Check if item has a data-file attribute
-				const dataFile = item.getAttribute('data-file');
-				if (dataFile) {
-					file = this.app.vault.getAbstractFileByPath(dataFile) as TFile;
-				}
-			}
-			
-			if (file && file instanceof TFile) {
-				// Avoid duplicates
-				if (!results.find(f => f.path === file!.path)) {
-					results.push(file);
-					elements.push(item);
-					console.log(`Added backlink: ${file.basename}`);
-				}
-			} else {
-				console.log(`Could not find file for backlink: ${linkText}`);
-			}
-		} catch (error) {
-			console.debug('Error processing backlink item:', error);
-		}
-	}
-
-	async navigate(direction: number, viewType: ViewType) {
-		// For backlinks, don't update if we've already captured the list
-		// Only update if we don't have results yet
-		if (this.resultsCache.length === 0 || (viewType === 'search')) {
-			this.updateResults();
-		}
-		
-		if (this.resultsCache.length === 0) {
-			const viewName = viewType === 'backlinks' ? 'backlinks' : 'search results';
-			console.log(`🔍 No ${viewName} found. Make sure you have results visible.`);
+		if (this.searchResultsCache.length === 0) {
 			return;
 		}
 
-		// Navigate
+		// Clamp index to valid range
+		this.selectedIndex = Math.max(0, Math.min(index, this.searchResultsCache.length - 1));
+
+		// Update mode-specific index
+		if (this.currentMode === 'search') {
+			this.searchModeIndex = this.selectedIndex;
+		} else {
+			this.backlinksModeIndex = this.selectedIndex;
+		}
+
+		// Highlight the element
+		if (this.resultElements.length > this.selectedIndex) {
+			this.highlightElement(this.resultElements[this.selectedIndex]);
+		}
+
+		// Display the file
+		const currentFile = this.searchResultsCache[this.selectedIndex];
+		if (currentFile) {
+			await this.updatePreview(currentFile);
+		}
+	}
+
+	async navigate(direction: number) {
+		// Update results cache
+		this.updateSearchResults();
+
+		if (this.searchResultsCache.length === 0) {
+			console.log('No search results found');
+			return;
+		}
+
+		// Navigate from current position
 		this.selectedIndex += direction;
-		
+
 		// Wrap around
 		if (this.selectedIndex < 0) {
-			this.selectedIndex = this.resultsCache.length - 1;
-		} else if (this.selectedIndex >= this.resultsCache.length) {
+			this.selectedIndex = this.searchResultsCache.length - 1;
+		} else if (this.selectedIndex >= this.searchResultsCache.length) {
 			this.selectedIndex = 0;
 		}
 
-		const currentFile = this.resultsCache[this.selectedIndex];
+		// Save the index for the current mode
+		if (this.currentMode === 'search') {
+			this.searchModeIndex = this.selectedIndex;
+		} else {
+			this.backlinksModeIndex = this.selectedIndex;
+		}
+
+		const currentFile = this.searchResultsCache[this.selectedIndex];
 		if (!currentFile) {
-			console.log('❌ No file found at index', this.selectedIndex);
+			console.log('No file found at index', this.selectedIndex);
 			return;
 		}
-		
-		// Store current file for Navigation View to display
-		this.currentFile = currentFile;
-		
+
 		// Highlight the selected element
-		if (this.selectedIndex < this.resultElements.length) {
+		if (this.resultElements[this.selectedIndex]) {
 			this.highlightElement(this.resultElements[this.selectedIndex]);
 		}
-		
-		// Update Navigation View to show the file content
-		if (this.navigationView) {
-			this.navigationView.updateDisplay();
-		}
-		
-		// For backlinks, open in preview but don't let it change the backlinks panel
-		await this.updatePreview(currentFile, viewType);
-		
-		const viewName = viewType === 'backlinks' ? 'backlink' : 'result';
-		console.log(`✅ Navigated to ${viewName} ${this.selectedIndex + 1}/${this.resultsCache.length}: ${currentFile.basename}`);
+
+		await this.updatePreview(currentFile);
+
+		console.log(`Navigated to result ${this.selectedIndex + 1}/${this.searchResultsCache.length}: ${currentFile.basename}`);
 	}
 
-	async updatePreview(file: TFile, viewType: ViewType) {
-		// Get or create the preview leaf
-		if (!this.previewLeaf || !this.previewLeaf.view) {
-			// Create a new leaf for preview if it doesn't exist
-			// Use 'split' to avoid creating a visible tab initially
-			this.previewLeaf = this.app.workspace.getLeaf('split');
-			// Hide the leaf by detaching it from the workspace visually
-			// We'll keep it attached but not visible
-		}
-
-		// Check if the leaf is pinned
-		const isPinned = (this.previewLeaf as any).pinned;
-		
-		if (isPinned) {
-			// If pinned, create a new leaf for preview
-			this.previewLeaf = this.app.workspace.getLeaf('split');
-		}
-
-		// Open the file in the preview leaf (don't activate it)
-		// This should not create a visible tab if the leaf is not active
-		await this.previewLeaf.openFile(file, { active: false });
-		
-		// For backlinks, make sure we restore focus to the original file's backlinks
-		// This prevents the backlinks panel from switching to show the new file's backlinks
-		if (viewType === 'backlinks' && this.originalBacklinksFile) {
-			// Small delay to let the file open, then restore backlinks view
-			setTimeout(() => {
-				const backlinksView = this.getBacklinksView();
-				if (backlinksView) {
-					// Try to keep the backlinks view showing the original file
-					// by ensuring the original file is still active in another leaf
-					const leaves = this.app.workspace.getLeavesOfType('markdown');
-					const originalLeaf = leaves.find(leaf => {
-						const view = leaf.view as MarkdownView;
-						return view && view.file && view.file.path === this.originalBacklinksFile!.path;
-					});
-					
-					if (!originalLeaf && this.originalBacklinksFile) {
-						// If the original file isn't open, open it in a background leaf
-						// This keeps the backlinks panel showing the original file
-						this.app.workspace.openLinkText(this.originalBacklinksFile.path, '', false);
-					}
-				}
-			}, 100);
+	async updatePreview(file: TFile) {
+		// Update the Search Tab view if it's open
+		if (this.searchTabView) {
+			await this.searchTabView.displayFile(file);
 		}
 	}
 
-	async openInNewTab(viewType: ViewType) {
-		this.updateResults();
-		
-		if (this.resultsCache.length === 0) {
-			const viewName = viewType === 'backlinks' ? 'backlinks' : 'search results';
-			console.log(`No ${viewName} available`);
+	async openInNewTab(switchFocus: boolean = false) {
+		this.updateSearchResults();
+
+		console.log('openInNewTab called', {
+			cacheLength: this.searchResultsCache.length,
+			selectedIndex: this.selectedIndex,
+			currentMode: this.currentMode,
+			switchFocus
+		});
+
+		if (this.searchResultsCache.length === 0) {
+			console.log('No search results available');
 			return;
 		}
 
-		const currentFile = this.resultsCache[this.selectedIndex];
-		
-		// Store reference to navigation leaf before opening new tab
-		const navLeaf = this.navigationLeaf;
-		
-		// Open in a brand new tab (but don't activate it immediately)
-		const newLeaf = this.app.workspace.getLeaf('tab');
-		await newLeaf.openFile(currentFile, { active: false }); // Don't activate
-
-		console.log(`Opened ${currentFile.basename} in new tab`);
-		
-		// Immediately return focus to the Navigation View without delay
-		if (navLeaf) {
-			// Use requestAnimationFrame to ensure the tab is created but we switch back immediately
-			requestAnimationFrame(() => {
-				this.app.workspace.revealLeaf(navLeaf);
-				// Also ensure the navigation view is focused
-				if (this.navigationView) {
-					this.navigationView.contentEl.focus();
-				}
-			});
-			setTimeout(() => {
-				this.app.workspace.setActiveLeaf(this.navigationLeaf!, { focus: true });
-			}, 50);
-		}
-	}
-
-	async openInNewTabAndFocus(viewType: ViewType) {
-		this.updateResults();
-		
-		if (this.resultsCache.length === 0) {
-			const viewName = viewType === 'backlinks' ? 'backlinks' : 'search results';
-			console.log(`No ${viewName} available`);
+		const currentFile = this.searchResultsCache[this.selectedIndex];
+		if (!currentFile) {
+			console.log('No file selected at index', this.selectedIndex);
 			return;
 		}
 
-		const currentFile = this.resultsCache[this.selectedIndex];
-		
-		// Open in a new tab and switch focus to it
-		const newLeaf = this.app.workspace.getLeaf('tab');
-		await newLeaf.openFile(currentFile, { active: true }); // Activate it
+		console.log('Opening file:', currentFile.basename);
 
-		console.log(`Opened ${currentFile.basename} in new tab and switched focus`);
-	}
+		if (switchFocus) {
+			// Switch focus mode: check for existing tab first
+			const existingLeaf = this.findLeafWithFile(currentFile);
 
-	async openToSide(viewType: ViewType) {
-		this.updateResults();
-		
-		if (this.resultsCache.length === 0) {
-			const viewName = viewType === 'backlinks' ? 'backlinks' : 'search results';
-			console.log(`No ${viewName} available`);
-			return;
-		}
-
-		const currentFile = this.resultsCache[this.selectedIndex];
-		
-		// Open in a split pane (new tab group to the side)
-		const newLeaf = this.app.workspace.getLeaf('split', 'vertical');
-		await newLeaf.openFile(currentFile, { active: true }); // Activate it so user can see it
-
-		console.log(`Opened ${currentFile.basename} in split pane`);
-	}
-
-	async activateNavigationView() {
-		if (!this.navigationLeaf) {
-			this.navigationLeaf = this.app.workspace.getLeaf('tab');
-			await this.navigationLeaf.setViewState({
-				type: NAVIGATION_VIEW_TYPE,
-				active: true,
-			});
-			this.navigationView = this.navigationLeaf.view as unknown as NavigationView;
+			if (existingLeaf) {
+				// File is already open, switch to it
+				console.log(`File ${currentFile.basename} already open, switching to existing tab`);
+				this.app.workspace.setActiveLeaf(existingLeaf, { focus: true });
+			} else {
+				// Open in a brand new tab and switch to it
+				const newLeaf = this.app.workspace.getLeaf('tab');
+				await newLeaf.openFile(currentFile);
+				console.log(`Opened ${currentFile.basename} in new tab and switched focus`);
+			}
 		} else {
-			this.app.workspace.revealLeaf(this.navigationLeaf);
+			// Keep focus mode: always create a new tab (even if duplicate)
+			const newLeaf = this.app.workspace.getLeaf('tab');
+			await newLeaf.openFile(currentFile);
+			console.log(`Opened ${currentFile.basename} in new tab`);
+
+			// Return focus to Search Tab
+			if (this.searchTabView) {
+				const searchTabLeaves = this.app.workspace.getLeavesOfType(SEARCH_TAB_VIEW_TYPE);
+				if (searchTabLeaves.length > 0) {
+					this.app.workspace.setActiveLeaf(searchTabLeaves[0], { focus: true });
+				}
+			}
 		}
+	}
+
+	findLeafWithFile(file: TFile): WorkspaceLeaf | null {
+		// Find all markdown leaves
+		const leaves = this.app.workspace.getLeavesOfType('markdown');
+
+		for (const leaf of leaves) {
+			const view = leaf.view as MarkdownView;
+
+			// Skip the embedded leaf used in Search Tab
+			if (this.searchTabView?.embeddedLeaf && leaf === this.searchTabView.embeddedLeaf) {
+				continue;
+			}
+
+			// Also skip if this leaf's parent is hidden (additional check for embedded leaf)
+			const parent = (leaf as any).parent;
+			if (parent && parent.containerEl) {
+				const parentEl = parent.containerEl;
+				// Check if parent is hidden (characteristic of embedded leaf)
+				if (parentEl.style.display === 'none' ||
+					parentEl.style.left === '-10000px' ||
+					parseInt(parentEl.style.width) === 0) {
+					continue;
+				}
+			}
+
+			// Check if this leaf has the same file
+			if (view.file && view.file.path === file.path) {
+				return leaf;
+			}
+		}
+
+		return null;
 	}
 
 	onunload() {
